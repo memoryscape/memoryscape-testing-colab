@@ -1,24 +1,94 @@
-from flask import Flask, render_template, request, redirect, url_for, session
-
-from firebase_admin import credentials, initialize_app, storage, auth
-# Init firebase with your credentials
-cred = credentials.Certificate("/content/memoryscape-59213-b6a4d1938f99.json")
-
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+import os
+from firebase_admin import credentials, initialize_app, storage, auth, firestore
+from typing import Optional, List
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from flask_cors import CORS
+import base64
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.urandom(12)
 
-# Function to check if the user is authenticated
-def is_authenticated():
+cred = credentials.Certificate("/Users/dhruvroongta/Downloads/memoryscape-59213-b6a4d1938f99.json")
+initialize_app(cred)
+firestore_client = firestore.client()
+coll_ref = firestore_client.collection("memoryscape_users")
+
+
+def process(imgList, user_name, vault_name):
+  ct = 1
+  for img in imgList:
+    img = img.decode()
+    cv2.imwrite("/content/" + str(ct) + ".jpg", img)
+    bucket = storage.bucket("memoryscape-59213.appspot.com")
+    blob = bucket.blob(user_name + "/" + vault_name + "/" + str(ct) + ".jpg")
+    blob.upload_from_filename("/content/" + str(ct) + ".jpg")
+    blob.make_public()
+    os.remove("/content/" + str(ct) + ".jpg")
+    ct += 2
+
+def add_user(email: str) -> None:
+    doc_ref = coll_ref.document(email)
+    create_time = doc_ref.set({
+        "email": email,
+        "vaults": []
+    })
+
+
+def add_vault(email: str, vault_name: str, vault_url: str, shared: bool) -> None:
+    doc_ref = coll_ref.document(email)
+    doc_ref.update({"vaults": firestore.ArrayUnion([{"vault_url": vault_url, "vault_name": vault_name, "shared": shared}])})
+
+
+def is_authenticated() -> bool:
     return 'user_id' in session
 
-# Route for the home page
+def stitchImage(size):
+  images = []
+  ct = 1
+
+  for i in range(size):
+    bucket = storage.bucket("memoryscape-59213.appspot.com")
+    blob = bucket.get_blob(str(ct) + ".jpg")
+    blob.download_to_filename(str(ct) + ".jpg")
+    images.append(cv2.imread("/content/" + str(ct) + ".jpg"))
+    os.remove("/content/" + str(ct) + ".jpg")
+    ct += 2
+  prev = images[0]
+
+  for i in range(1, len(images)):
+    prev = np.concatenate([prev, images[i]], axis = 1)
+  cv2.imwrite("/content/res.jpg", prev)
+
+  plt.imshow(prev)
+
+  bucket = storage.bucket("memoryscape-59213.appspot.com")
+  blob = bucket.blob("result.jpg")
+  blob.upload_from_filename("/content/res.jpg")
+  blob.make_public()
+  os.remove("/content/res.jpg")
+  return blob.public_url
+
+def process(imgList, user_name, vault_name):
+  ct = 1
+
+  for img in imgList:
+    cv2.imwrite("/content/" + str(ct) + ".jpg", img)
+    bucket = storage.bucket("memoryscape-59213.appspot.com")
+    blob = bucket.blob(str(ct) + ".jpg")
+    blob.upload_from_filename("/content/" + str(ct) + ".jpg")
+    blob.make_public()
+    os.remove("/content/" + str(ct) + ".jpg")
+    ct += 2
+
 @app.route('/')
 def home():
     if is_authenticated():
         return f'Hello, User {session["user_id"]}! <a href="/logout">Logout</a>'
     return 'Home Page - <a href="/login">Login</a> - <a href="/signup">Sign Up</a>'
 
-# Route for user registration (sign up)
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
@@ -35,13 +105,14 @@ def signup():
             blob.upload_from_filename('')
             blob.make_public()
             session['user_id'] = user.uid
+            add_user(user.uid)
             return redirect(url_for('home'))
         except auth.AuthError as e:
             return f"Sign up failed: {e}"
 
     return render_template('signup.html')
 
-# Route for user login
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -56,6 +127,36 @@ def login():
             return f"Login failed: {e}"
 
     return render_template('login.html')
+
+@app.route('/get_vaults/<email>', methods = ['GET'])
+def get_vaults(email: str):
+    try: 
+        result = coll_ref.document(email).get()
+        return jsonify({'result': result.to_dict()})
+    except Exception as e: 
+        return f"Getting Vaults failed: {e}"
+
+@app.route('/share_vault', methods = ['POST'])
+def share_vault():
+    try: 
+        email = request.form('email')
+        vault_name = request.form('vault_name')
+        vault_url = request.form('vault_url')
+        share_emails = request.form('share_emails')
+        for share_email in share_emails:
+            add_vault(share_email,vault_name, vault_url, True)
+    except Exception as e: 
+        return f"Sharing Vaults failed: {e}"
+
+@app.route('/get_images', methods = ['GET'])
+def get_images():
+    try:
+        email = request.form('email')
+        vault_name = request.form('vault_name')
+        list_imgs = request.form('list_imgs')
+        process(list_imgs, email, vault_name)
+    except Exception as e:
+        return f"Images not received: {e}"
 
 if __name__ == '__main__':
     app.run(debug=True)
