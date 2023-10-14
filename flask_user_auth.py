@@ -1,4 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask_mysqldb import MySQL
+import MySQLdb.cursors
+import re
 import os
 from firebase_admin import credentials, initialize_app, storage, auth, firestore
 from typing import Optional, List
@@ -9,6 +12,11 @@ import base64
 app = Flask(__name__)
 CORS(app)
 app.secret_key = os.urandom(12)
+
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = ''
+app.config['MYSQL_DB'] = 'login'
 
 cred = credentials.Certificate("/Users/dhruvroongta/Downloads/memoryscape-59213-b6a4d1938f99.json")
 initialize_app(cred)
@@ -96,10 +104,11 @@ def signup():
         password = request.form['password']
 
         try:
-            user = auth.create_user(
-                email=email,
-                password=password
-            )
+            cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cursor.execute('SELECT * FROM accounts WHERE email = % s', (email, ))
+            account = cursor.fetchone()
+            cursor.execute('INSERT INTO accounts VALUES (NULL, % s, % s)', (password, email, ))
+            mysql.connection.commit()
             bucket = storage.bucket("memoryscape-59213.appspot.com")
             blob = bucket.blob(email + "/")
             blob.upload_from_filename('')
@@ -107,7 +116,7 @@ def signup():
             session['user_id'] = user.uid
             add_user(user.uid)
             return redirect(url_for('home'))
-        except auth.AuthError as e:
+        except Exception as e:
             return f"Sign up failed: {e}"
 
     return render_template('signup.html')
@@ -120,10 +129,15 @@ def login():
         password = request.form['password']
 
         try:
-            user = auth.sign_in_with_email_and_password(email, password)
-            session['user_id'] = user['localId']
+            cursor = mysql.connection.cursor(MySQLdb.cursors.DictCursor)
+            cursor.execute('SELECT * FROM accounts WHERE username = % s AND password = % s', (username, password, ))
+            account = cursor.fetchone()
+            if account:
+              session['user_id'] = user['localId']
+            else:
+              raise Exception
             return redirect(url_for('home'))
-        except auth.AuthError as e:
+        except Exception as e:
             return f"Login failed: {e}"
 
     return render_template('login.html')
