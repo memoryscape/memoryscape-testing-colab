@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, session
 
+from firebase_admin import credentials, initialize_app, storage, auth
+# Init firebase with your credentials
+cred = credentials.Certificate("/content/memoryscape-59213-b6a4d1938f99.json")
+
 app = Flask(__name__)
 app.secret_key = os.urandom(12)
 
@@ -26,6 +30,10 @@ def signup():
                 email=email,
                 password=password
             )
+            bucket = storage.bucket("memoryscape-59213.appspot.com")
+            blob = bucket.blob(email + "/")
+            blob.upload_from_filename('')
+            blob.make_public()
             session['user_id'] = user.uid
             return redirect(url_for('home'))
         except auth.AuthError as e:
