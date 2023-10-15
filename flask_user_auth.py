@@ -26,14 +26,14 @@ coll_ref = firestore_client.collection("memoryscape_users")
 
 def process(imgList, user_name, vault_name):
   ct = 1
-  for img in imgList:
-    img = img.decode()
-    cv2.imwrite("/content/" + str(ct) + ".jpg", img)
+  for i in imgList.keys():
+    file = imgList[i]
+    file.save("filename2.jpg")
     bucket = storage.bucket("memoryscape-59213.appspot.com")
     blob = bucket.blob(user_name + "/" + vault_name + "/" + str(ct) + ".jpg")
-    blob.upload_from_filename("/content/" + str(ct) + ".jpg")
+    blob.upload_from_filename("filename2.jpg")
     blob.make_public()
-    os.remove("/content/" + str(ct) + ".jpg")
+    os.remove("filename2.jpg")
     ct += 2
 
 def add_user(email: str) -> None:
@@ -162,13 +162,14 @@ def share_vault():
     except Exception as e: 
         return f"Sharing Vaults failed: {e}"
 
-@app.route('/get_images', methods = ['GET'])
-def get_images():
+@app.route('/get_images/<email>/<vault_name>', methods = ['GET'])
+def get_images(email, vault_name):
     try:
-        email = request.form('email')
-        vault_name = request.form('vault_name')
-        list_imgs = request.form('list_imgs')
+        list_imgs = request.files
         process(list_imgs, email, vault_name)
+
+        files = request.files
+      
     except Exception as e:
         return f"Images not received: {e}"
 
